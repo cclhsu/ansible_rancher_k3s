@@ -1,0 +1,216 @@
+---
+# - name: Add required modules
+#   modprobe:
+#     name: "{{ item.name }}"
+#     state: present
+#   loop:
+#     "{{ _module }}"
+#   tags: k3s-server
+
+# - name: Setup required sysctl params
+#   sysctl:
+#     name: "{{ item.key }}"
+#     value: "{{ item.value }}"
+#     sysctl_set: yes
+#     state: present
+#     reload: yes
+#   loop:
+#     "{{ _sysctl }}"
+#   tags: k3s-server
+
+# - name: yum install yum-utils
+#   yum:
+#     name: "yum-utils"
+#     state: "present"
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-server
+
+# - name: yum-config-manager --enable
+#   command: yum-config-manager --{{ item.state }} {{ item.name }}
+#   loop: "{{ _repo_state_manager }}"
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-server
+
+# - name: yum install yum-plugin-fastestmirror
+#   yum:
+#     name: "yum-plugin-fastestmirror"
+#     state: "present"
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-server
+
+# - name: Disable yum-plugin-fastestmirror
+#   lineinfile:
+#     path: "/etc/yum/pluginconf.d/fastestmirror.conf"
+#     regexp: "^enabled="
+#     line: "enabled=0"
+#     state: "present"
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-server
+
+# - name: Add signing keys
+#   rpm_key:
+#     key: "{{ item.gpg }}"
+#     state: present
+#   loop: "{{ _key }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-server
+
+# - name: Add repositories
+#   yum_repository:
+#     name: "{{ item.name }}"
+#     description: "{{ item.name }}"
+#     baseurl: "{{ item.repo }}"
+#     # gpgkey: http://server.com/keys/somerepo.pub
+#     gpgcheck: no
+#     repo_gpgcheck: no
+#     # params: "{{ my_role_somerepo_params }}"
+#     state: present
+#     enabled: yes
+#   loop: "{{ _repo }}"
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-server
+
+# - name: Update all packages
+#   yum:
+#     name: '*'
+#     state: latest
+#     update_cache: yes
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-server
+
+# - name: Install packages
+#   yum:
+#     name: "{{ item.name }}"
+#     state: "{{ item.state }}"
+#     update_cache: yes
+#     disable_gpg_check: yes
+#   loop: "{{ _package }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-server
+
+# - name: just force systemd to reread configs
+#   systemd:
+#     daemon_reload: yes
+#   tags: k3s-server
+
+# - name: Start and enable services
+#   systemd:
+#     name: "{{ item.name }}"
+#     state: started
+#     enabled: yes
+#     daemon_reload: yes
+#   loop: "{{ _service }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-server
+
+# - name: Add /usr/local/bin to sudo secure_path
+#   lineinfile:
+#     line: 'Defaults    secure_path = /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin'
+#     regexp: "Defaults(\s)*secure_path(\s)*="
+#     state: present
+#     insertafter: EOF
+#     path: /etc/sudoers
+#     validate: 'visudo -cf %s'
+#   tags: k3s-server
+
+- name: Download script
+  get_url:
+    url: "{{ item.url }}"
+    # checksum: "{{ item.checksum }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0755
+  loop: "{{ _install_script }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-server
+
+- name: Execute script
+  shell: "INSTALL_K3S_SELINUX_WARN=true INSTALL_K3S_VERSION={{ K3S_VERSION }} sh {{ item.dest }}"
+  become: true
+  loop: "{{ _install_script }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-server
+
+- name: Remove script
+  file:
+    path: "{{ item.dest }}"
+    state: absent
+  loop: "{{ _install_script }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-server
+
+- name: Start and enable services
+  systemd:
+    name: "{{ item.name }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  loop: "{{ _service }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-server
+
+- name: Wait until node token is generated
+  wait_for:
+    path: /var/lib/rancher/k3s/server/node-token
+  run_once: true
+  tags: k3s-server
+
+- name: Get node token
+  slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: K3S_TOKEN
+  run_once: true
+  tags: k3s-server
+
+- name: Clean up node token contents
+  set_fact: 
+    K3S_TOKEN: "{{ K3S_TOKEN['content'] | b64decode | replace('\n', '')}}"
+    cacheable: yes
+  run_once: yes
+  tags: k3s-server
+
+- name: Print cluster node token
+  debug:
+    msg: "{{ K3S_TOKEN }}"
+  tags: k3s-server
+
+- name: Set server address
+  register: K3S_URL
+  set_fact:
+    K3S_URL: "https://{{ ansible_host }}:6443"
+    cacheable: yes
+  run_once: yes
+  tags: k3s-server
+
+- name: Print server address
+  debug:
+    msg: "{{ K3S_URL }}"
+  tags: k3s-server
+
+- name: copy the output to a local file
+  copy:
+    content: "{{ K3S_TOKEN }}"
+    dest: "{{ server.token_path }}"
+  delegate_to: localhost
+  tags: k3s-server
+
+- name: copy the output to a local file
+  copy:
+    content: "{{ K3S_URL }}"
+    dest: "{{ server.url_path }}"
+  delegate_to: localhost
+  tags: k3s-server

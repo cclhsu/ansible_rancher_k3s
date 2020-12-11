@@ -1,0 +1,169 @@
+---
+# - name: Add required modules
+#   modprobe:
+#     name: "{{ item.name }}"
+#     state: present
+#   loop:
+#     "{{ _module }}"
+#   tags: k3s-agent
+
+# - name: Setup required sysctl params
+#   sysctl:
+#     name: "{{ item.key }}"
+#     value: "{{ item.value }}"
+#     sysctl_set: yes
+#     state: present
+#     reload: yes
+#   loop:
+#     "{{ _sysctl }}"
+#   tags: k3s-agent
+
+# - name: Install packages that allow apt to be used over HTTPS
+#   apt:
+#     name: "{{ packages }}"
+#     state: present
+#     update_cache: yes
+#   vars:
+#     packages:
+#     - apt-transport-https
+#     - ca-certificates
+#     - curl
+#     - gnupg2
+#     - software-properties-common
+#   tags: k3s-agent
+
+# - name: copy templates
+#   template:
+#     dest: "{{ item.dest }}"
+#     src: "{{ item.src | default('./templates' + item.dest + '.j2') }}"
+#     owner: "{{ item.owner | default('root') }}"
+#     group: "{{ item.group | default('root') }}"
+#     mode: "{{ item.mode | default('0644') }}"
+#   loop:
+#     - { dest: "/etc/apt/sources.list" }
+#   tags: k3s-agent
+
+# - name: Add signing keys
+#   apt_key:
+#     url: "{{ item.gpg }}"
+#     state: present
+#   loop: "{{ _key }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-agent
+
+# - name: Add repositoies
+#   apt_repository:
+#     repo: "{{ item.repo }}"
+#     state: present
+#   loop: "{{ _repo }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-agent
+
+# - name: Update all packages
+#   apt:
+#     name: '*'
+#     state: latest
+#     update_cache: yes
+#   changed_when: false
+#   ignore_errors: true
+#   tags: k3s-agent
+
+# - name: Install packages
+#   apt:
+#     name: "{{ item.name }}"
+#     state: "{{ item.state }}"
+#   loop: "{{ _package }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-agent
+
+# - name: just force systemd to reread configs
+#   systemd:
+#     daemon_reload: yes
+#   tags: k3s-agent
+
+# - name: Start and enable services
+#   systemd:
+#     name: "{{ item.name }}"
+#     state: started
+#     enabled: yes
+#     daemon_reload: yes
+#   loop: "{{ _service }}"
+#   register: result
+#   until: result is succeeded
+#   tags: k3s-agent
+
+# - name: Add /usr/local/bin to sudo secure_path
+#   lineinfile:
+#     line: 'Defaults    secure_path = /sbin:/bin:/usr/sbin:/usr/bin:/usr/local/bin'
+#     regexp: "Defaults(\s)*secure_path(\s)*="
+#     state: present
+#     insertafter: EOF
+#     path: /etc/sudoers
+#     validate: 'visudo -cf %s'
+#   tags: k3s-agent
+
+- name: Print cluster node token
+  debug:
+    msg: "{{ K3S_TOKEN }}"
+  tags: k3s-agent
+
+- name: Print server address
+  debug:
+    msg: "{{ K3S_URL }}"
+  tags: k3s-agent
+
+- name: ensure a directory exists
+  file:
+    path: /etc/rancher/k3s
+    state: directory
+  tags: k3s-agent
+
+- name: set k3s server config
+  template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+  tags: k3s-agent
+
+- name: Download script
+  get_url:
+    url: "{{ item.url }}"
+    # checksum: "{{ item.checksum }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: 0755
+  loop: "{{ _install_script }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-agent
+
+- name: Execute script
+  shell: "INSTALL_K3S_SELINUX_WARN=true INSTALL_K3S_VERSION={{ K3S_VERSION }} K3S_URL={{ K3S_URL }} K3S_TOKEN={{ K3S_TOKEN }} sh {{ item.dest }}"
+  become: true
+  loop: "{{ _install_script }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-agent
+
+- name: Remove script
+  file:
+    path: "{{ item.dest }}"
+    state: absent
+  loop: "{{ _install_script }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-agent
+
+- name: Start and enable services
+  systemd:
+    name: "{{ item.name }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  loop: "{{ _service }}"
+  register: result
+  until: result is succeeded
+  tags: k3s-agent
