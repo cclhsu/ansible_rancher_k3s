@@ -31,3 +31,6 @@ _pkill_script:
 
 _uninstall_script:
   - { url: "", checksum: "", dest: "/usr/local/bin/k3s-agent-uninstall.sh"  }
+
+deployment_host:
+  kube_config: /home/cclhsu/.kube/ansible_k3s_config

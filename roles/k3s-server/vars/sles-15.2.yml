@@ -37,3 +37,6 @@ K3S_VERSION: "v1.19.3+k3s2"
 server:
   token_path: /tmp/k3s_token
   url_path: /tmp/k3s_url
+
+deployment_host:
+  kube_config: /home/cclhsu/.kube/ansible_k3s_config

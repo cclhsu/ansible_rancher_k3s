@@ -172,3 +172,34 @@
     dest: "{{ server.url_path }}"
   delegate_to: localhost
   tags: k3s-server
+
+- name: Create directory .kube
+  file:
+    path: ~{{ ansible_user }}/.kube
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: "u=rwx,g=rx,o="
+  tags: k3s-server
+
+- name: Copy config file to user home directory
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: ~{{ ansible_user }}/.kube/config
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    mode: "u=rw,g=,o="
+  tags: k3s-server
+
+- name: Replace https://localhost:6443 by https://master-ip:6443
+  replace:
+    path: ~{{ ansible_user }}/.kube/config
+    regexp: '127.0.0.1'
+    replace: "{{ ansible_host }}"
+  tags: k3s-server
+
+- name: Fetch config file to user home directory
+  fetch:
+    src: ~{{ ansible_user }}/.kube/config
+    dest: "{{ deployment_host.kube_config }}"
+    flat: yes
+  tags: k3s-server
